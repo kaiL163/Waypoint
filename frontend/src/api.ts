@@ -2,6 +2,23 @@ import type { Dataset, Plan, ServiceRequest, Transport } from './model'
 
 const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') || 'http://localhost:8000'
 
+function errorDetail(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback
+  const detail = (payload as { detail?: unknown }).detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (item && typeof item === 'object' && 'msg' in item) return String((item as { msg: unknown }).msg)
+        return JSON.stringify(item)
+      })
+      .filter(Boolean)
+      .join('; ') || fallback
+  }
+  return fallback
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${base}${path}`, {
     ...init,
@@ -10,8 +27,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let detail = `Сервер вернул ${response.status}.`
     try {
-      const payload = await response.json()
-      if (typeof payload?.detail === 'string') detail = payload.detail
+      detail = errorDetail(await response.json(), detail)
     } catch {
       /* ignore */
     }
@@ -65,8 +81,7 @@ export const api = {
     if (!response.ok) {
       let detail = `Сервер вернул ${response.status}.`
       try {
-        const payload = await response.json()
-        if (typeof payload?.detail === 'string') detail = payload.detail
+        detail = errorDetail(await response.json(), detail)
       } catch {
         /* ignore */
       }

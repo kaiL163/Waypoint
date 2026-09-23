@@ -1,0 +1,125 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: waypoint
+      POSTGRES_USER: waypoint
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-waypoint_dev_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U waypoint -d waypoint"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  osrm-download:
+    image: curlimages/curl:8.13.0
+    user: "0:0"
+    environment:
+      OSM_PBF_URL: ${OSM_PBF_URL:-https://download.bbbike.org/osm/bbbike/Moscow/Moscow.osm.pbf}
+    volumes:
+      - osrm_data:/data
+    entrypoint: ["sh", "-ec"]
+    command: ["if [ ! -s /data/moscow.osm.pbf ]; then curl -fL --retry 5 --continue-at - -o /data/moscow.osm.pbf \"$$OSM_PBF_URL\"; fi"]
+
+  osrm-prep:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    volumes:
+      - osrm_data:/data
+    depends_on:
+      osrm-download:
+        condition: service_completed_successfully
+    entrypoint: ["sh", "-ec"]
+    command: ["if [ ! -f /data/.prepared ]; then osrm-extract -p /opt/car.lua /data/moscow.osm.pbf && osrm-partition /data/moscow.osrm && osrm-customize /data/moscow.osrm && touch /data/.prepared; fi"]
+
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    volumes:
+      - osrm_data:/data:ro
+    depends_on:
+      osrm-prep:
+        condition: service_completed_successfully
+    command: ["osrm-routed", "--algorithm", "mld", "--max-table-size", "100", "/data/moscow.osrm"]
+    restart: unless-stopped
+
+  osrm-prep-walk:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    volumes:
+      - osrm_data:/data
+    depends_on:
+      osrm-prep:
+        condition: service_completed_successfully
+    entrypoint: ["sh", "-ec"]
+    command: ["if [ ! -f /data/.prepared-walk ]; then cp /data/moscow.osm.pbf /data/moscow-walk.osm.pbf && osrm-extract -p /opt/foot.lua /data/moscow-walk.osm.pbf && osrm-partition /data/moscow-walk.osrm && osrm-customize /data/moscow-walk.osrm && touch /data/.prepared-walk; fi"]
+
+  osrm-walk:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    volumes:
+      - osrm_data:/data:ro
+    depends_on:
+      osrm-prep-walk:
+        condition: service_completed_successfully
+    command: ["osrm-routed", "--algorithm", "mld", "--max-table-size", "100", "/data/moscow-walk.osrm"]
+    restart: unless-stopped
+
+  osrm-prep-bike:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    volumes:
+      - osrm_data:/data
+    depends_on:
+      osrm-prep-walk:
+        condition: service_completed_successfully
+    entrypoint: ["sh", "-ec"]
+    command: ["if [ ! -f /data/.prepared-bike ]; then cp /data/moscow.osm.pbf /data/moscow-bike.osm.pbf && osrm-extract -p /opt/bicycle.lua /data/moscow-bike.osm.pbf && osrm-partition /data/moscow-bike.osrm && osrm-customize /data/moscow-bike.osrm && touch /data/.prepared-bike; fi"]
+
+  osrm-bike:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    volumes:
+      - osrm_data:/data:ro
+    depends_on:
+      osrm-prep-bike:
+        condition: service_completed_successfully
+    command: ["osrm-routed", "--algorithm", "mld", "--max-table-size", "100", "/data/moscow-bike.osrm"]
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      DB_HOST: db
+      DB_USER: waypoint
+      DB_NAME: waypoint
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-waypoint_dev_password}
+      OSRM_URL: http://osrm:5000
+      OSRM_WALK_URL: http://osrm-walk:5000
+      OSRM_BIKE_URL: http://osrm-bike:5000
+      MAX_SOLVE_SECONDS: ${MAX_SOLVE_SECONDS:-15}
+    depends_on:
+      db:
+        condition: service_healthy
+      osrm:
+        condition: service_started
+      osrm-walk:
+        condition: service_started
+      osrm-bike:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "${WAYPOINT_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  osrm_data:

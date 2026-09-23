@@ -1,5 +1,7 @@
-node_modules/
-dist/
-*.tsbuildinfo
-vite.config.js
-vite.config.d.ts
+.env
+backend/.venv/
+**/__pycache__/
+**/.pytest_cache/
+frontend/node_modules/
+frontend/dist/
+osrm-data/

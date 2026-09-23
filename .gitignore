@@ -3,3 +3,9 @@ dist/
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env.local
+.DS_Store

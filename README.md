@@ -1,11 +1,92 @@
-# Waypoint — React часть
+# Waypoint
 
-Запуск: `npm install`, затем `npm run dev`. Production сборка: `npm run build`.
+Диспетчерская панель для планирования маршрутов инженеров. Репозиторий разделён на две части:
 
-Демо-сценарий расположен в Москве: нажмите «Использовать демо-данные», «Построить план», откройте инженера или заявку, добавьте событие «Срочная заявка» и откройте «Сравнение планов».
+- `backend/` — API на **Python + FastAPI** (планировщик, демо-данные, загрузка JSON/CSV)
+- `frontend/` — UI на **React + Vite** (карта, диспетчерская панель)
 
-Без backend приложение использует локальный демонстрационный планировщик. Он учитывает навык, транспорт, смену, временное окно и примерное время поездки. Пробег считается по прямому расстоянию с коэффициентом 1,3; линии на карте показывают порядок остановок, а не автомобильные дороги. Для промышленного расчёта подключите backend.
+Без запущенного backend фронтенд работать не будет.
 
-Для подключения API задайте `VITE_API_BASE_URL` в `.env.local`. Клиент использует `/api/engineers`, `/api/requests`, `/api/planning/optimize`, `/api/planning/replan`, `/api/data/demo` и `/api/data/upload`. Формат плана соответствует типам в `src/model.ts`. Backend должен возвращать `Dataset` для demo/upload и `Plan` для optimize/replan.
+## Требования
 
-Загрузка поддерживает JSON с объектом `{ "engineers": [...], "requests": [...] }` и CSV. Для CSV можно выбрать два файла с `engineer` и `request` в имени либо использовать столбец `entity` со значениями `engineer` / `request`. Координаты задаются в WGS84 (`lat`, `lng`), время — `HH:mm`, навыки инженера в CSV разделяются `;`.
+- Python 3.11+
+- Node.js 20+ (или совместимый LTS)
+
+## Запуск backend
+
+```bash
+cd backend
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+
+# macOS / Linux
+source .venv/bin/activate
+
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+API будет доступен на [http://localhost:8000](http://localhost:8000). Документация: [http://localhost:8000/docs](http://localhost:8000/docs).
+
+## Запуск frontend
+
+В отдельном терминале:
+
+```bash
+cd frontend
+npm install
+```
+
+Создайте файл `frontend/.env.local` (можно скопировать из `.env.example`):
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+Затем:
+
+```bash
+npm run dev
+```
+
+Откройте адрес, который покажет Vite (обычно [http://localhost:5173](http://localhost:5173)).
+
+Production-сборка фронтенда: `npm run build`.
+
+## Быстрый сценарий
+
+1. Запустите backend и frontend.
+2. В UI нажмите «Демо-данные» → выберите сценарий (или «Использовать демо-данные»).
+3. Нажмите «Построить план».
+4. Откройте инженера или заявку, добавьте событие «Срочная заявка», откройте «Сравнение планов».
+
+## API
+
+| Метод | Путь | Назначение |
+|-------|------|------------|
+| `GET` | `/api/health` | Проверка живости |
+| `GET` | `/api/engineers` | Текущие инженеры |
+| `GET` | `/api/requests` | Текущие заявки |
+| `GET` | `/api/planning/current` | Текущий план |
+| `POST` | `/api/planning/optimize?strategy=optimized\|baseline` | Построить план (`Dataset` в теле) |
+| `POST` | `/api/planning/replan` | Событие + перепланирование |
+| `GET` | `/api/data/demos` | Список демо-сценариев |
+| `POST` | `/api/data/demo?scenario=standard` | Загрузить демо (`Dataset`) |
+| `POST` | `/api/data/upload` | Загрузка JSON/CSV (`multipart`, поле `files`) |
+
+Формат данных: `Dataset` / `Plan` — см. `frontend/src/model.ts` и `backend/app/models.py`.
+
+Планировщик учитывает навык, транспорт, смену, временное окно и примерное время поездки. Пробег считается по прямому расстоянию с коэффициентом 1,3; линии на карте показывают порядок остановок, а не автомобильные дороги.
+
+## Загрузка файлов
+
+Поддерживаются JSON вида `{ "engineers": [...], "requests": [...] }` и CSV.
+
+Для CSV можно:
+
+- выбрать два файла с `engineer` / `request` (или `инженер` / `заявк`) в имени;
+- либо использовать столбец `entity` со значениями `engineer` / `request`.
+
+Координаты — WGS84 (`lat`, `lng`), время — `HH:mm`, навыки инженера в CSV разделяются `;`.

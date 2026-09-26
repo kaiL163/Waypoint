@@ -1,6 +1,6 @@
 import type { Dataset, Plan, ServiceRequest, Transport } from './model'
 
-const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') || 'http://localhost:8000'
+const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') || ''
 
 function errorDetail(payload: unknown, fallback: string): string {
   if (!payload || typeof payload !== 'object') return fallback
@@ -47,18 +47,20 @@ export type UrgentInput = {
   windowEnd: string
   durationMinutes: number
   requiredSkill: string
-  requiredTransport: Transport
+  requiredTransport?: Transport
 }
 
 export type ReplanEvent =
-  | { type: 'urgent_request'; input: UrgentInput }
-  | { type: 'urgent_request'; request: ServiceRequest }
-  | { type: 'cancel_request'; requestId: string }
-  | { type: 'engineer_unavailable'; engineerId: string }
+  | { eventTime: string; type: 'urgent_request'; input: UrgentInput }
+  | { eventTime: string; type: 'urgent_request'; request: ServiceRequest }
+  | { eventTime: string; type: 'cancel_request'; requestId: string }
+  | { eventTime: string; type: 'engineer_unavailable'; engineerId: string }
 
-export type ReplanResult = { dataset: Dataset; plan: Plan; changes: string[] }
+export type ReplanResult = { dataset: Dataset; plan: Plan; baseline: Plan; changes: string[] }
 
 export const api = {
+  state: () => call<{dataset: Dataset | null; plan: Plan | null; baseline: Plan | null}>('/api/state'),
+  compare: (data: Dataset) => call<ReplanResult>('/api/planning/compare', {method:'POST',body:JSON.stringify(data)}),
   demos: () => call<DemoScenarioInfo[]>('/api/data/demos'),
   demo: (scenario?: string) =>
     call<Dataset>(`/api/data/demo${scenario ? `?scenario=${encodeURIComponent(scenario)}` : ''}`, {

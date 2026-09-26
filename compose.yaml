@@ -1,0 +1,92 @@
+name: waypoint
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: waypoint
+      POSTGRES_DB: waypoint
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-waypoint_dev_password}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U waypoint -d waypoint"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  osrm-download:
+    image: curlimages/curl:8.13.0
+    user: "0:0"
+    volumes: [osrm_data:/data]
+    environment:
+      OSM_PBF_URL: ${OSM_PBF_URL:-https://download.bbbike.org/osm/bbbike/Moscow/Moscow.osm.pbf}
+    entrypoint: [sh, -ec]
+    command:
+      - 'if [ ! -s /data/moscow.osm.pbf ]; then curl -fL --retry 5 --continue-at - -o /data/moscow.part "$$OSM_PBF_URL" && mv /data/moscow.part /data/moscow.osm.pbf; fi'
+  osrm-prepare:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    volumes: [osrm_data:/data]
+    depends_on:
+      osrm-download: {condition: service_completed_successfully}
+    entrypoint: [sh, -ec]
+    command:
+      - |
+        for mode in car foot bicycle; do
+          if [ ! -f /data/$$mode/.ready ]; then
+            mkdir -p /data/$$mode
+            cp /data/moscow.osm.pbf /data/$$mode/map.osm.pbf
+            osrm-extract -t 4 -p /opt/$$mode.lua /data/$$mode/map.osm.pbf
+            osrm-partition -t 4 /data/$$mode/map.osrm
+            osrm-customize -t 4 /data/$$mode/map.osrm
+            touch /data/$$mode/.ready
+          fi
+        done
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    volumes: [osrm_data:/data:ro]
+    depends_on:
+      osrm-prepare: {condition: service_completed_successfully}
+    command: [osrm-routed, --algorithm, mld, --max-table-size, '100', /data/car/map.osrm]
+    restart: unless-stopped
+  osrm-walk:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    volumes: [osrm_data:/data:ro]
+    depends_on:
+      osrm-prepare: {condition: service_completed_successfully}
+    command: [osrm-routed, --algorithm, mld, --max-table-size, '100', /data/foot/map.osrm]
+    restart: unless-stopped
+  osrm-bike:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    volumes: [osrm_data:/data:ro]
+    depends_on:
+      osrm-prepare: {condition: service_completed_successfully}
+    command: [osrm-routed, --algorithm, mld, --max-table-size, '100', /data/bicycle/map.osrm]
+    restart: unless-stopped
+  backend:
+    build: ./backend
+    environment:
+      DB_HOST: db
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-waypoint_dev_password}
+      OSRM_URL: http://osrm:5000
+      OSRM_WALK_URL: http://osrm-walk:5000
+      OSRM_BIKE_URL: http://osrm-bike:5000
+      MAX_SOLVE_SECONDS: ${MAX_SOLVE_SECONDS:-10}
+    depends_on:
+      db: {condition: service_healthy}
+      osrm: {condition: service_started}
+      osrm-walk: {condition: service_started}
+      osrm-bike: {condition: service_started}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health',timeout=5)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  frontend:
+    build: ./frontend
+    ports: ['127.0.0.1:${WAYPOINT_PORT:-5173}:80']
+    depends_on:
+      backend: {condition: service_healthy}
+    restart: unless-stopped
+volumes:
+  postgres_data:
+  osrm_data:

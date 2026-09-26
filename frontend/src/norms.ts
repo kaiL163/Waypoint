@@ -17,7 +17,7 @@ export const workNorms: WorkNorm[] = [
     technicalMinutes: 60,
     documentsMinutes: 10,
     totalMinutes: 90,
-    skill: 'Подключение',
+    skill: 'Работы на подключение и дозаказы',
   },
   {
     id: 'tkd-incident',
@@ -35,7 +35,7 @@ export const workNorms: WorkNorm[] = [
     technicalMinutes: 10,
     documentsMinutes: 10,
     totalMinutes: 40,
-    skill: 'Подключение',
+    skill: 'Работы на подключение и дозаказы',
   },
   {
     id: 'local',

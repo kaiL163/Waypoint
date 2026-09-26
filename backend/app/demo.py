@@ -174,6 +174,23 @@ DEMOS: list[dict] = [
 ]
 
 
+def large_demo() -> Dataset:
+    """Deterministic synthetic workload around real Moscow demo addresses."""
+    engineers=[]
+    requests=[]
+    for index in range(12):
+        source=ENGINEERS[index % len(ENGINEERS)]
+        engineers.append(source.model_copy(update={'id':f'large-e-{index+1}','name':f'{source.name} · {index+1}','shiftStart':'08:00','shiftEnd':'19:00'}))
+    for index in range(72):
+        source=STANDARD.requests[index % len(STANDARD.requests)]
+        hour=8+(index % 8)
+        requests.append(source.model_copy(update={'id':f'L{index+1:03d}','durationMinutes':25+(index % 4)*10,'windowStart':f'{hour:02d}:00','windowEnd':f'{hour+2:02d}:00','priority':'urgent' if index % 11==0 else 'normal','requiredTransport':source.requiredTransport if index % 3==0 else None}))
+    return Dataset(engineers=engineers,requests=requests,importWarnings=['Демонстрационная нагрузка: повторные выезды по одним адресам и синтетические смены.'])
+
+
+DEMOS.append({'id':'large','title':'Демо 5 · Большая смена','description':'12 инженеров, 72 заявки, срочные работы и пересекающиеся окна.','data':large_demo()})
+
+
 def list_demos() -> list[DemoScenarioInfo]:
     return [
         DemoScenarioInfo(id=item["id"], title=item["title"], description=item["description"])

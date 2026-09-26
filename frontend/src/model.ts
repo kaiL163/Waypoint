@@ -1,9 +1,9 @@
 export type Point = { lat: number; lng: number }
 export type Transport = 'car' | 'walk' | 'bike' | 'transit'
 export type Engineer = { id: string; name: string; startLocation: Point; shiftStart: string; shiftEnd: string; skills: string[]; transport: Transport; available: boolean }
-export type ServiceRequest = { id: string; location: Point & { address: string }; durationMinutes: number; eventTime?: string; windowStart: string; windowEnd: string; priority: 'normal' | 'urgent'; requiredSkill: string; requiredTransport?: Transport; status?: 'unplanned' | 'planned' | 'unassigned' | 'cancelled' }
-export type RouteStop = { requestId: string; order: number; plannedArrival: string; plannedStart: string; plannedEnd: string }
-export type EngineerRoute = { engineerId: string; stops: RouteStop[]; distanceKm: number; geometry?: Point[] | null }
-export type Plan = { routes: EngineerRoute[]; unassigned: { requestId: string; reason: string }[]; metrics: { usedEngineers: number; totalDistanceKm: number; assignedRequests: number; unassignedRequests: number } }
-export type Dataset = { engineers: Engineer[]; requests: ServiceRequest[] }
+export type ServiceRequest = { id: string; location: Point & { address: string; estimated?: boolean }; durationMinutes: number; eventTime?: string; windowStart: string; windowEnd: string; priority: 'normal' | 'urgent'; requiredSkill: string; requiredTransport?: Transport; status?: 'unplanned' | 'planned' | 'unassigned' | 'cancelled' }
+export type RouteStop = { requestId: string; order: number; plannedArrival: string; plannedStart: string; plannedEnd: string; explanation?: string; frozen?: boolean; travelMinutes?: number; distanceKm?: number }
+export type EngineerRoute = { engineerId: string; stops: RouteStop[]; distanceKm: number; geometry?: Point[] | null; explanation?: string }
+export type Plan = { warnings?: string[]; replannedAt?: string; routes: EngineerRoute[]; unassigned: { requestId: string; reason: string }[]; metrics: { usedEngineers: number; totalDistanceKm: number; assignedRequests: number; unassignedRequests: number } }
+export type Dataset = { revision?: number; importWarnings?: string[]; engineers: Engineer[]; requests: ServiceRequest[] }
 export const transportLabel: Record<Transport,string> = { car: 'Автомобиль', walk: 'Пешком', bike: 'Велосипед', transit: 'Общественный транспорт' }

@@ -8,7 +8,7 @@ WORK_NORMS = [
         "technicalMinutes": 60,
         "documentsMinutes": 10,
         "totalMinutes": 90,
-        "skill": "Подключение",
+        "skill": "Работы на подключение и дозаказы",
         "keywords": ["подключ", "конвергенц", "гбит"],
     },
     {
@@ -28,7 +28,7 @@ WORK_NORMS = [
         "technicalMinutes": 10,
         "documentsMinutes": 10,
         "totalMinutes": 40,
-        "skill": "Подключение",
+        "skill": "Работы на подключение и дозаказы",
         "keywords": ["дозаказ", "роутер", "приставк"],
     },
     {

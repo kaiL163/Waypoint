@@ -3,10 +3,12 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import re
 from typing import Any
 
 from fastapi import HTTPException, UploadFile
+from pydantic import ValidationError
 
 from .geocode import resolve_point
 from .models import Dataset, Engineer, Point, RequestLocation, ServiceRequest, Transport
@@ -17,7 +19,11 @@ TIME_FIND = re.compile(r"(?:^|\s)([01]\d|2[0-3]):[0-5]\d")
 
 
 def _transport(value: str) -> Transport:
-    return value if value in {"walk", "bike", "transit"} else "car"
+    aliases={'Автомобиль':'car','Пешеход':'walk','Пешком':'walk','Велосипед':'bike','Общественный транспорт':'transit'}
+    value=aliases.get(value,value) or 'car'
+    if value not in {'car','walk','bike','transit'}:
+        raise ValueError(f'Неизвестный транспорт: {value}')
+    return value
 
 
 def _valid_time(value: str) -> bool:
@@ -30,6 +36,7 @@ def _time_from(value: str) -> str:
 
 
 def validate_dataset(data: Dataset) -> Dataset:
+    data=Dataset.model_validate(data.model_dump())
     if not data.engineers or not data.requests:
         raise HTTPException(status_code=400, detail="Список инженеров и заявок не должен быть пустым.")
     for engineer in data.engineers:
@@ -47,7 +54,7 @@ def validate_dataset(data: Dataset) -> Dataset:
             or request.durationMinutes <= 0
             or not _valid_time(request.windowStart)
             or not _valid_time(request.windowEnd)
-            or request.windowStart >= request.windowEnd
+            or request.windowStart > request.windowEnd
             or not request.requiredSkill
         ):
             raise HTTPException(status_code=400, detail=f"Некорректные данные заявки {request.id or ''}.")
@@ -74,7 +81,7 @@ def validate_dataset(data: Dataset) -> Dataset:
         )
         for request in data.requests
     ]
-    return Dataset(engineers=engineers, requests=requests)
+    return Dataset(engineers=engineers, requests=requests,importWarnings=data.importWarnings,revision=data.revision)
 
 
 def _decode_bytes(raw: bytes) -> str:
@@ -140,6 +147,12 @@ def _to_request(row: dict[str, str]) -> ServiceRequest:
     try:
         lat = float(_row_get(row, "lat", "широта") or "nan")
         lng = float(_row_get(row, "lng", "долгота") or "nan")
+        estimated=not math.isfinite(lat) or not math.isfinite(lng)
+        if estimated:
+            address=_row_get(row,'address','адрес')
+            if not address:
+                raise ValueError('Нужны координаты или адрес.')
+            lat,lng=resolve_point(address,use_network=False)
         required_transport = _row_get(row, "requiredTransport")
         return ServiceRequest(
             id=_row_get(row, "id"),
@@ -147,11 +160,12 @@ def _to_request(row: dict[str, str]) -> ServiceRequest:
                 lat=lat,
                 lng=lng,
                 address=_row_get(row, "address", "адрес") or f"{lat}, {lng}",
+                estimated=estimated,
             ),
             durationMinutes=float(_row_get(row, "durationMinutes") or "0"),
             windowStart=_row_get(row, "windowStart"),
             windowEnd=_row_get(row, "windowEnd"),
-            priority="urgent" if _row_get(row, "priority") == "urgent" else "normal",
+            priority=_row_get(row, 'priority') or 'normal',
             requiredSkill=_row_get(row, "requiredSkill"),
             requiredTransport=_transport(required_transport) if required_transport else None,
         )
@@ -180,12 +194,12 @@ def _to_beeline_request(row: dict[str, str], *, use_network: bool = False) -> Se
         return None
     window_start = _time_from(row.get("Начало") or "")
     window_end = _time_from(row.get("Окончание") or "")
-    if not window_start or not window_end or window_start >= window_end:
+    if not window_start or not window_end or window_start > window_end:
         return None
     return ServiceRequest(
         id=request_id,
-        location=RequestLocation(lat=lat, lng=lng, address=address or district or f"{lat:.4f}, {lng:.4f}"),
-        durationMinutes=norm["totalMinutes"],
+        location=RequestLocation(lat=lat, lng=lng, address=address or district or f"{lat:.4f}, {lng:.4f}",estimated=not (_finite(lat_raw) and _finite(lng_raw))),
+        durationMinutes=norm["technicalMinutes"]+norm["documentsMinutes"],
         windowStart=window_start,
         windowEnd=window_end,
         priority="normal",
@@ -248,16 +262,25 @@ def _load_beeline_rows(rows: list[dict[str, str]]) -> Dataset:
             ),
         )
     engineers = _engineers_from_beeline(rows, requests)
-    return Dataset(engineers=engineers, requests=requests)
+    skipped=len(rows)-len(requests)
+    warnings=[f'Импорт Билайн: принято {len(requests)} из {len(rows)} строк, пропущено {skipped} (нет ID, адреса или корректного окна).',
+              'Параметры инженеров сгенерированы: стартовые точки, транспорт, все навыки набора и смена 08:00–22:00. Проверьте перед использованием.']
+    if skipped:
+        valid={r.id for r in requests}
+        warnings.append('Пропущены строки: '+', '.join(str(i+2) for i,r in enumerate(rows) if str(r.get('Заявка') or '').strip() not in valid))
+    return Dataset(engineers=engineers, requests=requests,importWarnings=warnings)
 
 
 async def read_dataset(files: list[UploadFile]) -> Dataset:
     engineers: list[Engineer] | None = None
     requests: list[ServiceRequest] | None = None
+    warnings=[]
 
     for upload in files:
         name = (upload.filename or "").lower()
-        raw = await upload.read()
+        raw = await upload.read(10_000_001)
+        if len(raw)>10_000_000:
+            raise HTTPException(413,'Файл превышает 10 МБ.')
         try:
             body = _decode_bytes(raw).lstrip("\ufeff")
         except Exception as exc:
@@ -287,6 +310,7 @@ async def read_dataset(files: list[UploadFile]) -> Dataset:
                         requests = [*(requests or []), *rs]
                 elif rows[0].get("Заявка") and (rows[0].get("Тип заявки HD") or rows[0].get("Тип заявки BK")):
                     loaded = _load_beeline_rows(rows)
+                    warnings.extend(loaded.importWarnings)
                     engineers = [*(engineers or []), *loaded.engineers]
                     requests = [*(requests or []), *loaded.requests]
                 else:
@@ -314,7 +338,13 @@ async def read_dataset(files: list[UploadFile]) -> Dataset:
                 detail=f"Ошибка разбора «{upload.filename}»: {exc}",
             ) from exc
 
-    return validate_dataset(Dataset(engineers=engineers or [], requests=requests or []))
+    estimated=sum(r.location.estimated for r in requests or [])
+    if estimated:
+        warnings.append(f'Приблизительные координаты: {estimated} заявок. Оценка по району/адресу, не точное геокодирование; пробег и время ориентировочные.')
+    try:
+        return validate_dataset(Dataset(engineers=engineers or [], requests=requests or [],importWarnings=warnings))
+    except ValidationError as exc:
+        raise HTTPException(422,str(exc)) from exc
 
 
 def _finite(value: Any) -> bool:
@@ -322,4 +352,4 @@ def _finite(value: Any) -> bool:
         number = float(value)
     except (TypeError, ValueError):
         return False
-    return number == number
+    return math.isfinite(number)

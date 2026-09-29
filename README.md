@@ -4,6 +4,8 @@
 
 Полная документация проекта находится в этом файле: [README в репозитории](https://github.com/kaiL163/Waypoint/blob/main/README.md). Здесь описаны архитектура, технологии, локальный запуск, Docker-развёртывание, API, данные, алгоритм и известные ограничения.
 
+Презентация проекта: [Открыть презентацию на Google Drive](https://drive.google.com/file/d/1ArjXkAd5poDFmDd73xCN4Q7QTUeFc2rM/view?usp=sharing).
+
 ## Быстрый запуск
 
 ### Требования
